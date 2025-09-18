@@ -1,5 +1,5 @@
 // Importación de bibliotecas y componentes necesarios
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -8,9 +8,9 @@ import {
   FlatList,
   Alert,
   StatusBar,
-} from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
-import { database, auth } from "../config/firebase";
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { database, auth } from '../config/firebase';
 import {
   collection,
   onSnapshot,
@@ -18,70 +18,113 @@ import {
   query,
   doc,
   getDoc,
-  where, // ✅ importa where
-} from "firebase/firestore";
-import { signOut } from "firebase/auth";
-import CardProductos from "../components/CardProductos";
+  where,
+} from 'firebase/firestore';
+import { signOut } from 'firebase/auth';
+import CardProductos from '../components/CardProductos';
 
 const Home = ({ navigation }) => {
+  // Estados para manejar los productos y perfil del usuario
   const [productos, setProductos] = useState([]);
   const [profile, setProfile] = useState(null);
 
-  // Carga perfil del usuario autenticado
+  /**
+   * Efecto para cargar el perfil del usuario autenticado
+   * Obtiene la información del usuario desde Firestore o usa datos básicos de Auth
+   */
   useEffect(() => {
     const user = auth.currentUser;
-    const load = async () => {
+    const loadUserProfile = async () => {
       if (!user) return;
+      
       try {
-        const snap = await getDoc(doc(database, "users", user.uid));
-        if (snap.exists()) setProfile(snap.data());
-        else
-          setProfile({
-            name: user.displayName || user.email,
-            email: user.email,
+        // Intentar obtener perfil completo desde Firestore
+        const userDocRef = doc(database, 'users', user.uid);
+        const userSnapshot = await getDoc(userDocRef);
+        
+        if (userSnapshot.exists()) {
+          setProfile(userSnapshot.data());
+        } else {
+          // Fallback: usar datos básicos de Firebase Auth
+          setProfile({ 
+            name: user.displayName || user.email, 
+            email: user.email 
           });
-      } catch (e) {
-        console.log("Error leyendo perfil:", e);
+        }
+      } catch (error) {
+        console.error('Error cargando perfil del usuario:', error);
+        // Establecer perfil básico en caso de error
+        setProfile({ 
+          name: user.displayName || user.email, 
+          email: user.email 
+        });
       }
     };
-    load();
+    
+    loadUserProfile();
   }, []);
 
-  // ✅ Consulta de productos SOLO del usuario logueado (tiempo real)
+  /**
+   * Efecto para obtener productos en tiempo real
+   * Solo muestra productos del usuario autenticado actual
+   * Nota: La combinación de where + orderBy puede requerir un índice compuesto en Firestore
+   */
   useEffect(() => {
-    const uid = auth.currentUser?.uid;
-    if (!uid) return; // aún no hay sesión
+    const currentUserId = auth.currentUser?.uid;
+    if (!currentUserId) return; // Salir si no hay usuario autenticado
 
-    // ⚠️ where + orderBy puede pedir un índice compuesto. Si Firebase te muestra un link "Create index", dale clic.
-    const q = query(
-      collection(database, "productos"),
-      where("uid", "==", uid), // ✅ solo mis productos
-      orderBy("creado", "desc") // ✅ más recientes primero
+    // Crear consulta para productos del usuario actual, ordenados por fecha
+    const productsQuery = query(
+      collection(database, 'productos'),
+      where('uid', '==', currentUserId), // Filtrar solo productos del usuario
+      orderBy('creado', 'desc') // Ordenar por más recientes primero
     );
 
-    const unsubscribe = onSnapshot(q, (querySnapshot) => {
-      const docs = [];
-      querySnapshot.forEach((docu) =>
-        docs.push({ id: docu.id, ...docu.data() })
-      );
-      setProductos(docs);
+    // Suscribirse a cambios en tiempo real
+    const unsubscribe = onSnapshot(productsQuery, (querySnapshot) => {
+      const productsList = [];
+      querySnapshot.forEach((document) => {
+        productsList.push({ 
+          id: document.id, 
+          ...document.data() 
+        });
+      });
+      setProductos(productsList);
+    }, (error) => {
+      console.error('Error obteniendo productos:', error);
+      Alert.alert('Error', 'No se pudieron cargar los productos');
     });
 
+    // Cleanup: desuscribirse al desmontar el componente
     return () => unsubscribe();
   }, []);
 
-  const goToEdit = () => navigation.navigate("EditProfile");
+  /**
+   * Navega a la pantalla de edición de perfil
+   */
+  const navigateToEditProfile = () => {
+    navigation.navigate('EditProfile');
+  };
 
-  const onLogout = async () => {
+  /**
+   * Maneja el proceso de cierre de sesión
+   * Cierra la sesión de Firebase y navega al login
+   */
+  const handleLogout = async () => {
     try {
       await signOut(auth);
-      navigation.reset({ index: 0, routes: [{ name: "Login" }] });
-    } catch (e) {
-      Alert.alert("Error", e.message);
+      // Resetear navegación para evitar que el usuario regrese
+      navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
+    } catch (error) {
+      console.error('Error durante el cierre de sesión:', error);
+      Alert.alert('Error', 'No se pudo cerrar la sesión correctamente');
     }
   };
 
-  const renderItem = ({ item }) => (
+  /**
+   * Renderiza cada item de la lista de productos
+   */
+  const renderProductItem = ({ item }) => (
     <CardProductos
       id={item.id}
       nombre={item.nombre}
@@ -92,51 +135,54 @@ const Home = ({ navigation }) => {
   );
 
   return (
-    <SafeAreaView style={styles.safe} edges={["top", "left", "right"]}>
-      <StatusBar barStyle="dark-content" />
-      {/* HEADER */}
+    <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
+      <StatusBar barStyle="light-content" backgroundColor="#0F0E0E" />
+      
+      {/* HEADER PRINCIPAL CON INFORMACIÓN DEL USUARIO */}
       <View style={styles.headerCard}>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.hello}>
-            {profile
-              ? `Hola, ${profile.name || profile.email || "usuario"}`
-              : "Cargando..."}
+        {/* Información del usuario */}
+        <View style={styles.userInfoContainer}>
+          <Text style={styles.welcomeText}>
+            {profile ? `Bienvenido, ${profile.name || profile.email || 'Usuario'}` : 'Cargando perfil...'}
           </Text>
-          <Text style={styles.subtitle}>Gestiona tus productos fácilmente</Text>
+          <Text style={styles.subtitle}>Panel de Control Profesional</Text>
         </View>
 
-        <View style={styles.headerBtns}>
-          <TouchableOpacity
-            style={[styles.smallBtn, styles.editBtn]}
-            onPress={goToEdit}
+        {/* Botones de acción del header */}
+        <View style={styles.headerButtons}>
+          <TouchableOpacity 
+            style={[styles.actionButton, styles.editButton]} 
+            onPress={navigateToEditProfile} 
             activeOpacity={0.85}
           >
-            <Text style={styles.smallBtnText}>Editar</Text>
+            <Text style={styles.actionButtonText}>Editar Perfil</Text>
           </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.smallBtn, styles.logoutBtn]}
-            onPress={onLogout}
+          
+          <TouchableOpacity 
+            style={[styles.actionButton, styles.logoutButton]} 
+            onPress={handleLogout} 
             activeOpacity={0.85}
           >
-            <Text style={styles.smallBtnText}>Salir</Text>
+            <Text style={styles.actionButtonText}>Cerrar Sesión</Text>
           </TouchableOpacity>
         </View>
       </View>
 
-      {/* TÍTULO */}
-      <Text style={styles.sectionTitle}>Productos disponibles</Text>
+      {/* TÍTULO DE SECCIÓN */}
+      <Text style={styles.sectionTitle}>Inventario de Productos</Text>
 
-      {/* LISTA */}
+      {/* LISTA DE PRODUCTOS */}
       <FlatList
         data={productos}
-        renderItem={renderItem}
+        renderItem={renderProductItem}
         keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.listContent}
+        contentContainerStyle={styles.listContainer}
+        showsVerticalScrollIndicator={false}
         ListEmptyComponent={
-          <View style={styles.emptyBox}>
-            <Text style={styles.emptyTitle}>Aún no hay productos</Text>
-            <Text style={styles.emptyText}>
-              Toca “+” para agregar tu primer producto.
+          <View style={styles.emptyStateContainer}>
+            <Text style={styles.emptyStateTitle}>Sin Productos Registrados</Text>
+            <Text style={styles.emptyStateDescription}>
+              Utilice el botón "Agregar" en la barra inferior para registrar su primer producto.
             </Text>
           </View>
         }
@@ -148,117 +194,141 @@ const Home = ({ navigation }) => {
 export default Home;
 
 const styles = StyleSheet.create({
+  // Contenedor principal con fondo oscuro profesional
   safe: {
     flex: 1,
-    backgroundColor: "#F6F8FA",
+    backgroundColor: '#0F0E0E',
   },
 
-  // Header card
+  // Tarjeta del header principal
   headerCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    backgroundColor: "#FFFFFF",
-    marginHorizontal: 16,
-    marginTop: 8,
-    padding: 16,
-    borderRadius: 16,
-    // sombra
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.07,
-    shadowRadius: 12,
-    elevation: 5,
-  },
-  hello: {
-    fontSize: 18,
-    fontWeight: "800",
-    color: "#111827",
-  },
-  subtitle: {
-    marginTop: 4,
-    fontSize: 13,
-    color: "#6B7280",
-  },
-  headerBtns: {
-    flexDirection: "row",
-    gap: 8,
-  },
-  smallBtn: {
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 10,
-  },
-  smallBtnText: {
-    color: "#fff",
-    fontWeight: "800",
-    fontSize: 12,
-  },
-  editBtn: { backgroundColor: "#0288d1" },
-  logoutBtn: { backgroundColor: "#e53935" },
-
-  // Sección
-  sectionTitle: {
-    fontSize: 20,
-    fontWeight: "800",
-    color: "#111827",
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#EEEEEE',
+    marginHorizontal: 20,
     marginTop: 16,
-    marginBottom: 8,
-    marginHorizontal: 16,
-  },
-
-  // Lista y vacío
-  listContent: {
-    paddingHorizontal: 12,
-    paddingBottom: 100, // espacio para el FAB (aunque ya no está)
-  },
-  emptyBox: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 16,
-    marginHorizontal: 4,
-    marginTop: 12,
-    padding: 24,
-    alignItems: "center",
-    // sombra
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.05,
-    shadowRadius: 10,
-    elevation: 4,
-  },
-  emptyTitle: {
-    fontSize: 16,
-    fontWeight: "800",
-    color: "#111827",
-    marginBottom: 4,
-  },
-  emptyText: {
-    fontSize: 13,
-    color: "#6B7280",
-    textAlign: "center",
-  },
-
-  // FAB (eliminado)
-  fab: {
-    position: "absolute",
-    right: 20,
-    bottom: 26,
-    width: 58,
-    height: 58,
-    borderRadius: 29,
-    backgroundColor: "#0288d1",
-    alignItems: "center",
-    justifyContent: "center",
-    shadowColor: "#0288d1",
+    padding: 20,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#8B9A46',
+    // Sombras para efecto elevado
+    shadowColor: '#000',
     shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.25,
-    shadowRadius: 12,
+    shadowOpacity: 0.15,
+    shadowRadius: 16,
     elevation: 8,
   },
-  fabText: {
-    color: "#fff",
-    fontSize: 30,
-    lineHeight: 30,
-    fontWeight: "900",
+
+  // Contenedor de información del usuario
+  userInfoContainer: {
+    flex: 1,
+    marginRight: 16,
+  },
+
+  // Texto de bienvenida
+  welcomeText: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#0F0E0E',
+    marginBottom: 4,
+    letterSpacing: 0.3,
+  },
+
+  // Subtítulo descriptivo
+  subtitle: {
+    fontSize: 14,
+    color: '#541212',
+    fontWeight: '500',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+
+  // Contenedor de botones del header
+  headerButtons: {
+    gap: 8,
+  },
+
+  // Estilo base para botones de acción
+  actionButton: {
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    minWidth: 80,
+    alignItems: 'center',
+  },
+
+  // Texto de los botones de acción
+  actionButtonText: {
+    color: '#EEEEEE',
+    fontWeight: '700',
+    fontSize: 12,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+
+  // Botón de editar perfil
+  editButton: { 
+    backgroundColor: '#8B9A46',
+  },
+
+  // Botón de cerrar sesión
+  logoutButton: { 
+    backgroundColor: '#541212',
+  },
+
+  // Título de sección principal
+  sectionTitle: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: '#EEEEEE',
+    marginTop: 24,
+    marginBottom: 16,
+    marginHorizontal: 20,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+  },
+
+  // Contenedor de la lista de productos
+  listContainer: {
+    paddingHorizontal: 16,
+    paddingBottom: 100, // Espacio para la barra de pestañas
+  },
+
+  // Contenedor del estado vacío
+  emptyStateContainer: {
+    backgroundColor: '#EEEEEE',
+    borderRadius: 12,
+    marginHorizontal: 4,
+    marginTop: 20,
+    padding: 32,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#8B9A46',
+    // Sombras suaves
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    elevation: 6,
+  },
+
+  // Título del estado vacío
+  emptyStateTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#0F0E0E',
+    marginBottom: 8,
+    textAlign: 'center',
+    letterSpacing: 0.5,
+  },
+
+  // Descripción del estado vacío
+  emptyStateDescription: {
+    fontSize: 14,
+    color: '#541212',
+    textAlign: 'center',
+    lineHeight: 20,
+    fontWeight: '400',
   },
 });

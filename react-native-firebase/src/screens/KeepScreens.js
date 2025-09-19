@@ -10,6 +10,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  ActivityIndicator,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { auth, database } from "../config/firebase";
@@ -17,158 +18,236 @@ import { collection, addDoc, serverTimestamp } from "firebase/firestore";
 import * as ImagePicker from "expo-image-picker";
 
 const Add = ({ navigation }) => {
-  // Guardamos el precio como string para no pelear con el TextInput
+  // Estados para manejar los datos del formulario
   const [nombre, setNombre] = useState("");
-  const [precioStr, setPrecioStr] = useState("");
+  const [precioStr, setPrecioStr] = useState(""); // Precio como string para compatibilidad con TextInput
   const [imagen, setImagen] = useState("");
   const [saving, setSaving] = useState(false);
 
-  const goToHome = () => navigation.goBack();
+  /**
+   * Navega de regreso a la pantalla principal
+   */
+  const navigateToHome = () => {
+    navigation.goBack();
+  };
 
-  const openGalery = async () => {
+  /**
+   * Abre la galería del dispositivo para seleccionar una imagen
+   * Utiliza expo-image-picker con configuración optimizada
+   */
+  const openImageGallery = async () => {
     try {
-      let result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.All,
+      // Solicitar permisos si es necesario
+      const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      
+      if (permissionResult.granted === false) {
+        Alert.alert("Permisos requeridos", "Se necesitan permisos para acceder a la galería de imágenes.");
+        return;
+      }
+
+      // Lanzar selector de imágenes con configuración profesional
+      const pickerResult = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
-        aspect: [8, 8],
-        quality: 1,
+        aspect: [1, 1], // Relación cuadrada para productos
+        quality: 0.8, // Calidad optimizada para rendimiento
+        exif: false, // No incluir metadatos EXIF por privacidad
       });
 
-      if (!result.canceled && result.assets?.length > 0) {
-        setImagen(result.assets[0].uri);
+      if (!pickerResult.canceled && pickerResult.assets?.length > 0) {
+        setImagen(pickerResult.assets[0].uri);
       }
     } catch (error) {
-      console.log("Error al abrir la galería", error);
+      console.error("Error al acceder a la galería:", error);
+      Alert.alert("Error", "No se pudo acceder a la galería de imágenes.");
     }
   };
 
-  const agregarProducto = async () => {
+  /**
+   * Elimina la imagen seleccionada del formulario
+   */
+  const removeSelectedImage = () => {
+    setImagen("");
+  };
+
+  /**
+   * Procesa y guarda el nuevo producto en Firestore
+   * Incluye validaciones completas y manejo de errores
+   */
+  const saveProduct = async () => {
     try {
-      // ✅ verificar sesión
-      const uid = auth.currentUser?.uid;
-      if (!uid) {
-        Alert.alert("Sesión", "Debes iniciar sesión para agregar productos.");
+      // Verificar que el usuario esté autenticado
+      const currentUserId = auth.currentUser?.uid;
+      if (!currentUserId) {
+        Alert.alert("Sesión Expirada", "Debe iniciar sesión para agregar productos.");
         return;
       }
 
-      // Validación simple
-      const precioNum = Number(precioStr.replace(",", "."));
+      // Validación del nombre del producto
       if (!nombre.trim()) {
-        Alert.alert("Falta el nombre", "Ingresa un nombre para el producto.");
+        Alert.alert("Campo Requerido", "Ingrese un nombre para el producto.");
         return;
       }
-      if (!precioStr || isNaN(precioNum) || precioNum < 0) {
-        Alert.alert(
-          "Precio inválido",
-          "Ingresa un precio válido (por ejemplo 9.99)."
-        );
+
+      // Validación y conversión del precio
+      const precioNumber = Number(precioStr.replace(",", "."));
+      if (!precioStr || isNaN(precioNumber) || precioNumber < 0) {
+        Alert.alert("Precio Inválido", "Ingrese un precio válido (ejemplo: 25.99).");
         return;
       }
 
       setSaving(true);
 
-      // Placeholder mientras no subimos a Storage
-      const imageUrl = imagen || "Storage ya no es gratuito";
+      // URL de imagen placeholder (mientras no se implemente Storage)
+      const imageUrl = imagen || "https://via.placeholder.com/400x400/8B9A46/EEEEEE?text=Sin+Imagen";
 
+      // Crear documento del producto en Firestore
       await addDoc(collection(database, "productos"), {
         nombre: nombre.trim(),
-        precio: precioNum,
+        precio: precioNumber,
         vendido: false,
         creado: serverTimestamp(),
         imagen: imageUrl,
-        uid, // ✅ dueño del producto
+        uid: currentUserId, // Asociar producto al usuario actual
       });
 
-      // (opcional) limpiar formulario
+      // Limpiar formulario después del guardado exitoso
       setNombre("");
       setPrecioStr("");
       setImagen("");
 
-      Alert.alert("Producto agregado", "El producto se agregó correctamente", [
-        { text: "Ok", onPress: goToHome },
-      ]);
-    } catch (error) {
-      console.error("Error al agregar el producto", error);
       Alert.alert(
-        "Error",
-        "Ocurrió un error al agregar el producto. Intenta nuevamente."
+        "Producto Registrado", 
+        "El producto ha sido agregado exitosamente al inventario.",
+        [{ text: "Continuar", onPress: navigateToHome }]
+      );
+
+    } catch (error) {
+      console.error("Error al guardar producto:", error);
+      Alert.alert(
+        "Error de Sistema",
+        "No se pudo guardar el producto. Verifique su conexión e intente nuevamente."
       );
     } finally {
       setSaving(false);
     }
   };
 
-  const canSubmit = nombre.trim().length > 0 && precioStr.length > 0;
+  // Validación para habilitar el botón de guardar
+  const canSubmitForm = nombre.trim().length > 0 && precioStr.length > 0 && !saving;
 
   return (
     <SafeAreaView style={styles.safe}>
       <KeyboardAvoidingView
-        style={{ flex: 1 }}
+        style={styles.keyboardContainer}
         behavior={Platform.OS === "ios" ? "padding" : "height"}
       >
         <ScrollView
-          contentContainerStyle={styles.scroll}
+          contentContainerStyle={styles.scrollContainer}
           keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
         >
-          <View style={styles.card}>
-            <Text style={styles.title}>Agregar producto</Text>
+          {/* Tarjeta principal del formulario */}
+          <View style={styles.formCard}>
+            
+            {/* Header del formulario */}
+            <View style={styles.headerSection}>
+              <Text style={styles.title}>Registro de Producto</Text>
+              <Text style={styles.subtitle}>Complete la información del nuevo producto</Text>
+            </View>
 
-            <View style={styles.inputBlock}>
-              <Text style={styles.label}>Nombre</Text>
+            {/* Campo: Nombre del producto */}
+            <View style={styles.inputSection}>
+              <Text style={styles.fieldLabel}>Nombre del Producto</Text>
               <TextInput
-                style={styles.input}
-                placeholder="Ej: Camiseta azul"
+                style={styles.textInput}
+                placeholder="Ej: Laptop Dell Inspiron 15"
+                placeholderTextColor="#8B9A46"
                 value={nombre}
                 onChangeText={setNombre}
                 returnKeyType="next"
+                maxLength={100}
               />
             </View>
 
-            <View style={styles.inputBlock}>
-              <Text style={styles.label}>Precio</Text>
+            {/* Campo: Precio */}
+            <View style={styles.inputSection}>
+              <Text style={styles.fieldLabel}>Precio (USD)</Text>
               <TextInput
-                style={styles.input}
-                placeholder="Ej: 9.99"
+                style={styles.textInput}
+                placeholder="Ej: 599.99"
+                placeholderTextColor="#8B9A46"
                 value={precioStr}
                 onChangeText={setPrecioStr}
                 keyboardType="decimal-pad"
                 returnKeyType="done"
+                maxLength={10}
               />
             </View>
 
-            <Text style={[styles.label, { marginTop: 6 }]}>Imagen</Text>
-            <TouchableOpacity
-              onPress={openGalery}
-              style={styles.imagePicker}
-              activeOpacity={0.85}
-            >
-              <Text style={styles.imagePickerText}>Seleccionar imagen</Text>
-            </TouchableOpacity>
+            {/* Sección de imagen */}
+            <View style={styles.imageSection}>
+              <Text style={styles.fieldLabel}>Imagen del Producto</Text>
+              
+              {/* Botón para seleccionar imagen */}
+              <TouchableOpacity
+                onPress={openImageGallery}
+                style={styles.imagePickerButton}
+                activeOpacity={0.85}
+                disabled={saving}
+              >
+                <Text style={styles.imagePickerText}>Seleccionar desde Galería</Text>
+              </TouchableOpacity>
 
-            {imagen ? (
-              <Image source={{ uri: imagen }} style={styles.imagePreview} />
-            ) : (
-              <Text style={styles.helper}>No has seleccionado imagen.</Text>
-            )}
+              {/* Preview de imagen o estado vacío */}
+              {imagen ? (
+                <View style={styles.imagePreviewContainer}>
+                  <Image source={{ uri: imagen }} style={styles.imagePreview} />
+                  <TouchableOpacity
+                    onPress={removeSelectedImage}
+                    style={styles.removeImageButton}
+                    activeOpacity={0.85}
+                  >
+                    <Text style={styles.removeImageText}>Remover Imagen</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <Text style={styles.noImageText}>
+                  No se ha seleccionado ninguna imagen
+                </Text>
+              )}
+            </View>
 
-            <TouchableOpacity
-              style={[styles.button, !canSubmit && { opacity: 0.5 }]}
-              onPress={agregarProducto}
-              disabled={!canSubmit || saving}
-              activeOpacity={0.9}
-            >
-              <Text style={styles.buttonText}>
-                {saving ? "Guardando..." : "Agregar producto"}
-              </Text>
-            </TouchableOpacity>
+            {/* Botones de acción */}
+            <View style={styles.actionsSection}>
+              
+              {/* Botón principal: Guardar producto */}
+              <TouchableOpacity
+                style={[styles.primaryButton, !canSubmitForm && styles.disabledButton]}
+                onPress={saveProduct}
+                disabled={!canSubmitForm}
+                activeOpacity={0.9}
+              >
+                {saving ? (
+                  <View style={styles.loadingContainer}>
+                    <ActivityIndicator color="#EEEEEE" size="small" />
+                    <Text style={styles.buttonText}>Guardando...</Text>
+                  </View>
+                ) : (
+                  <Text style={styles.buttonText}>Registrar Producto</Text>
+                )}
+              </TouchableOpacity>
 
-            <TouchableOpacity
-              style={[styles.button, styles.secondary]}
-              onPress={goToHome}
-              activeOpacity={0.9}
-            >
-              <Text style={styles.buttonText}>Volver a Home</Text>
-            </TouchableOpacity>
+              {/* Botón secundario: Volver */}
+              <TouchableOpacity
+                style={styles.secondaryButton}
+                onPress={navigateToHome}
+                activeOpacity={0.9}
+                disabled={saving}
+              >
+                <Text style={styles.secondaryButtonText}>Volver al Inicio</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -179,85 +258,212 @@ const Add = ({ navigation }) => {
 export default Add;
 
 const styles = StyleSheet.create({
+  // Contenedor principal con fondo oscuro profesional
   safe: {
     flex: 1,
-    backgroundColor: "#F6F8FA",
+    backgroundColor: "#0F0E0E",
   },
-  scroll: {
+
+  // Contenedor del KeyboardAvoidingView
+  keyboardContainer: { 
+    flex: 1 
+  },
+
+  // Configuración del ScrollView
+  scrollContainer: {
     flexGrow: 1,
-    padding: 20,
-    justifyContent: "center", // Centrado vertical
+    padding: 24,
+    justifyContent: "center",
   },
-  card: {
-    backgroundColor: "#fff",
-    borderRadius: 16,
-    padding: 20,
-    // sombra
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.08,
-    shadowRadius: 12,
-    elevation: 6,
-  },
-  title: {
-    fontSize: 22,
-    fontWeight: "800",
-    textAlign: "center",
-    marginBottom: 16,
-    color: "#111827",
-  },
-  inputBlock: { marginBottom: 14 },
-  label: {
-    fontSize: 13,
-    color: "#374151",
-    marginBottom: 6,
-    fontWeight: "600",
-  },
-  input: {
-    height: 48,
-    borderColor: "#E5E7EB",
+
+  // Tarjeta principal del formulario
+  formCard: {
+    backgroundColor: "#EEEEEE",
+    borderRadius: 12,
+    padding: 32,
     borderWidth: 1,
-    borderRadius: 12,
-    backgroundColor: "#FFFFFF",
-    paddingHorizontal: 12,
-    fontSize: 16,
+    borderColor: "#8B9A46",
+    // Sombras profesionales
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.15,
+    shadowRadius: 16,
+    elevation: 8,
   },
-  imagePicker: {
-    backgroundColor: "#0288d1",
-    paddingVertical: 12,
-    borderRadius: 12,
+
+  // Sección del header
+  headerSection: {
+    marginBottom: 32,
     alignItems: "center",
-    marginTop: 6,
-    marginBottom: 12,
   },
-  imagePickerText: {
-    color: "white",
-    fontWeight: "800",
+
+  // Título principal
+  title: {
+    fontSize: 24,
+    fontWeight: "700",
+    textAlign: "center",
+    marginBottom: 8,
+    color: "#0F0E0E",
+    letterSpacing: 0.5,
   },
-  imagePreview: {
-    width: "100%",
-    height: 180,
-    borderRadius: 12,
-    marginBottom: 10,
+
+  // Subtítulo descriptivo
+  subtitle: {
+    fontSize: 16,
+    textAlign: "center",
+    color: "#541212",
+    fontWeight: "400",
+    lineHeight: 22,
   },
-  helper: {
-    fontSize: 12,
-    color: "#6B7280",
-    marginBottom: 10,
+
+  // Sección de cada campo de entrada
+  inputSection: { 
+    marginBottom: 20 
   },
-  button: {
-    backgroundColor: "#0288d1",
+
+  // Etiquetas de los campos
+  fieldLabel: {
+    fontSize: 14,
+    color: "#0F0E0E",
+    marginBottom: 8,
+    fontWeight: "600",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+
+  // Campos de texto de entrada
+  textInput: {
+    height: 52,
+    borderColor: "#8B9A46",
+    borderWidth: 2,
+    borderRadius: 8,
+    backgroundColor: "#EEEEEE",
+    paddingHorizontal: 16,
+    fontSize: 16,
+    color: "#0F0E0E",
+    fontWeight: "500",
+  },
+
+  // Sección de imagen
+  imageSection: {
+    marginBottom: 24,
+  },
+
+  // Botón para seleccionar imagen
+  imagePickerButton: {
+    backgroundColor: "#8B9A46",
     paddingVertical: 14,
-    borderRadius: 12,
+    borderRadius: 8,
     alignItems: "center",
     marginTop: 8,
+    marginBottom: 16,
   },
-  secondary: {
-    backgroundColor: "#9CA3AF",
+
+  // Texto del botón de seleccionar imagen
+  imagePickerText: {
+    color: "#EEEEEE",
+    fontWeight: "700",
+    fontSize: 14,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
   },
+
+  // Contenedor del preview de imagen
+  imagePreviewContainer: {
+    alignItems: "center",
+  },
+
+  // Preview de la imagen seleccionada
+  imagePreview: {
+    width: "100%",
+    height: 200,
+    borderRadius: 8,
+    marginBottom: 12,
+    borderWidth: 2,
+    borderColor: "#8B9A46",
+  },
+
+  // Botón para remover imagen
+  removeImageButton: {
+    backgroundColor: "#541212",
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 6,
+  },
+
+  // Texto del botón remover imagen
+  removeImageText: {
+    color: "#EEEEEE",
+    fontSize: 12,
+    fontWeight: "600",
+    textTransform: "uppercase",
+  },
+
+  // Texto cuando no hay imagen
+  noImageText: {
+    fontSize: 14,
+    color: "#8B9A46",
+    fontStyle: "italic",
+    textAlign: "center",
+    marginTop: 8,
+  },
+
+  // Sección de botones de acción
+  actionsSection: {
+    gap: 12,
+  },
+
+  // Botón principal
+  primaryButton: {
+    backgroundColor: "#541212",
+    paddingVertical: 16,
+    borderRadius: 8,
+    alignItems: "center",
+    shadowColor: "#541212",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+
+  // Estado deshabilitado del botón principal
+  disabledButton: {
+    backgroundColor: "#8B9A46",
+    opacity: 0.6,
+  },
+
+  // Contenedor de loading
+  loadingContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+
+  // Texto de los botones principales
   buttonText: {
-    color: "white",
-    fontWeight: "800",
+    color: "#EEEEEE",
+    fontWeight: "700",
+    fontSize: 16,
+    textTransform: "uppercase",
+    letterSpacing: 1,
+  },
+
+  // Botón secundario
+  secondaryButton: {
+    backgroundColor: "transparent",
+    paddingVertical: 14,
+    borderRadius: 8,
+    alignItems: "center",
+    borderWidth: 2,
+    borderColor: "#541212",
+  },
+
+  // Texto del botón secundario
+  secondaryButtonText: {
+    color: "#541212",
+    fontWeight: "600",
     fontSize: 15,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
   },
 });

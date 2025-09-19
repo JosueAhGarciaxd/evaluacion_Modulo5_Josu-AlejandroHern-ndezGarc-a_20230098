@@ -1,7 +1,9 @@
-import { initializeApp } from "firebase/app";
-import { getFirestore } from "firebase/firestore";
-import { getStorage } from "firebase/storage";
-import { getAuth } from "firebase/auth";
+// src/config/firebase.js
+import { initializeApp, getApps } from 'firebase/app';
+import { initializeAuth, getReactNativePersistence } from 'firebase/auth';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getFirestore } from 'firebase/firestore';
+import { getStorage } from 'firebase/storage';
 import {
   API_KEY,
   AUTH_DOMAIN,
@@ -9,10 +11,8 @@ import {
   STORAGE_BUCKET,
   MESSAGING_SENDER_ID,
   APP_ID,
-  test,
-} from "@env";
+} from '@env';
 
-// Configuración de Firebase
 const firebaseConfig = {
   apiKey: API_KEY,
   authDomain: AUTH_DOMAIN,
@@ -22,43 +22,20 @@ const firebaseConfig = {
   appId: APP_ID,
 };
 
-console.log(test);
-console.log("Valor de configuracion", firebaseConfig);
+// Evita doble inicialización en Fast Refresh
+const app = getApps().length > 0 ? getApps()[0] : initializeApp(firebaseConfig);
 
-// Inicializamos Firebase
-const app = initializeApp(firebaseConfig);
-
-if (app) {
-  console.log("Firebase initialized successfully");
-} else {
-  console.log("Firebase initialization failed");
+// Auth con persistencia en React Native
+let auth;
+if (!global.auth) {
+  global.auth = initializeAuth(app, {
+    persistence: getReactNativePersistence(AsyncStorage),
+  });
 }
+auth = global.auth;
 
-// Firestore
+// Firestore y Storage
 const database = getFirestore(app);
-if (database) {
-  console.log("Firestore initialized correctly");
-} else {
-  console.log("Firestore initialization failed");
-}
-
-// Authentication
-const auth = getAuth(app);
-if (auth) {
-  console.log("Auth initialized correctly");
-} else {
-  console.log("Auth initialization failed");
-}
-
-/*
-// Storage (lo dejas comentado si no lo necesitas aún)
 const storage = getStorage(app);
-if (storage) {
-  console.log("storage initialized correctly");
-} else {
-  console.log("storage initialization failed");
-}
-*/
 
-// Exportamos lo necesario
-export { database, auth /*, storage*/ };
+export { app, auth, database, storage };

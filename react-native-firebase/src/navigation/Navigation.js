@@ -1,74 +1,191 @@
 // src/navigation/Navigation.js
-import React from "react";
-import { NavigationContainer } from "@react-navigation/native";
-import { createNativeStackNavigator } from "@react-navigation/native-stack";
-import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
-import Ionicons from "@expo/vector-icons/Ionicons";
+import React from 'react';
+import { NavigationContainer } from '@react-navigation/native';
+import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import Ionicons from '@expo/vector-icons/Ionicons';
 
-// Screens
-import Splash from "../screens/SplashScreens";
-import Home from "../screens/HomeSrceens";
-import Add from "../screens/KeepScreens";
-import EditProfile from "../screens/EditProfile";
-import Login from "../screens/Login";
-import Register from "../screens/Register";
+// Importación de pantallas de la aplicación
+import Splash from '../screens/SplashScreens';
+import Home from '../screens/HomeSrceens';
+import Add from '../screens/KeepScreens';
+import EditProfile from '../screens/EditProfileScreens';
+import Login from '../screens/LoginScreens';
+import Register from '../screens/RegisterScreens';
 
+// Inicialización de navegadores
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
 
-// --- Tabs privadas (después de iniciar sesión) ---
+/**
+ * Configuración de pestañas principales para usuarios autenticados
+ * Incluye: Inicio, Agregar contenido y Perfil del usuario
+ */
 function MainTabs() {
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
-        headerTitleAlign: "center",
-        tabBarActiveTintColor: "#0288d1",
-        tabBarInactiveTintColor: "#94a3b8",
-        tabBarLabelStyle: { fontSize: 12, fontWeight: "700" },
-        tabBarStyle: { height: 58, paddingBottom: 6 },
+        // Configuración de header
+        headerTitleAlign: 'center',
+        headerStyle: {
+          backgroundColor: '#0F0E0E', // Fondo oscuro profesional
+          borderBottomWidth: 1,
+          borderBottomColor: '#8B9A46', // Línea de separación verde oliva
+          elevation: 8, // Sombra en Android
+          shadowColor: '#000', // Sombra en iOS
+          shadowOffset: { width: 0, height: 2 },
+          shadowOpacity: 0.25,
+          shadowRadius: 8,
+        },
+        headerTitleStyle: {
+          fontSize: 18,
+          fontWeight: '700',
+          color: '#EEEEEE', // Texto claro para contraste
+          letterSpacing: 1,
+          textTransform: 'uppercase',
+        },
+        
+        // Configuración de la barra de pestañas
+        tabBarActiveTintColor: '#541212', // Color activo rojo oscuro
+        tabBarInactiveTintColor: '#8B9A46', // Color inactivo verde oliva
+        tabBarLabelStyle: { 
+          fontSize: 11, 
+          fontWeight: '600',
+          textTransform: 'uppercase',
+          letterSpacing: 0.5,
+          marginTop: 2,
+        },
+        tabBarStyle: { 
+          height: 62,
+          paddingBottom: 8,
+          paddingTop: 8,
+          backgroundColor: '#EEEEEE', // Fondo claro para la barra
+          borderTopWidth: 2,
+          borderTopColor: '#8B9A46', // Línea superior verde oliva
+          elevation: 12, // Sombra pronunciada
+          shadowColor: '#000',
+          shadowOffset: { width: 0, height: -2 },
+          shadowOpacity: 0.15,
+          shadowRadius: 12,
+        },
+        
+        // Configuración de iconos con lógica condicional
         tabBarIcon: ({ focused, color, size }) => {
-          let icon = "home";
-          if (route.name === "Home") icon = focused ? "home" : "home-outline";
-          if (route.name === "Agregar")
-            icon = focused ? "add-circle" : "add-circle-outline";
-          if (route.name === "Perfil")
-            icon = focused ? "person" : "person-outline";
-          return <Ionicons name={icon} size={size} color={color} />;
+          let iconName = 'home';
+          
+          // Selección de iconos según la ruta y estado de foco
+          switch (route.name) {
+            case 'Home':
+              iconName = focused ? 'home' : 'home-outline';
+              break;
+            case 'Agregar':
+              iconName = focused ? 'add-circle' : 'add-circle-outline';
+              break;
+            case 'Perfil':
+              iconName = focused ? 'person' : 'person-outline';
+              break;
+          }
+          
+          return (
+            <Ionicons 
+              name={iconName} 
+              size={focused ? size + 2 : size} // Iconos activos ligeramente más grandes
+              color={color} 
+            />
+          );
         },
       })}
     >
-      <Tab.Screen name="Home" component={Home} options={{ title: "Inicio" }} />
+      {/* Pestaña: Pantalla principal */}
+      <Tab.Screen
+        name="Home"
+        component={Home}
+        options={{ 
+          title: 'Inicio',
+          tabBarLabel: 'Inicio',
+        }}
+      />
+      
+      {/* Pestaña: Agregar nuevo contenido */}
       <Tab.Screen
         name="Agregar"
         component={Add}
-        options={{ title: "Agregar" }}
+        options={{ 
+          title: 'Nuevo Registro',
+          tabBarLabel: 'Agregar',
+        }}
       />
+      
+      {/* Pestaña: Perfil del usuario */}
       <Tab.Screen
         name="Perfil"
         component={EditProfile}
-        options={{ title: "Mi perfil" }}
+        options={{ 
+          title: 'Mi Perfil Profesional',
+          tabBarLabel: 'Perfil',
+        }}
       />
     </Tab.Navigator>
   );
 }
 
-// --- Navegación raíz ---
+/**
+ * Navegación principal de la aplicación
+ * Maneja el flujo desde splash screen hasta autenticación y app principal
+ */
 export default function Navigation() {
   return (
     <NavigationContainer>
       <Stack.Navigator
-        initialRouteName="Splash" // 👈 Splash primero
-        screenOptions={{ headerShown: false }} // 👈 sin header en el stack raíz
+        initialRouteName="Splash" // Pantalla inicial: splash screen
+        screenOptions={{ 
+          headerShown: false, // Ocultar headers del stack principal
+          animation: 'slide_from_right', // Animación de transición
+          gestureEnabled: true, // Habilitar gestos de navegación
+        }}
       >
-        {/* Splash decide si ir a MainTabs o Login */}
-        <Stack.Screen name="Splash" component={Splash} />
+        {/* Pantalla de carga inicial */}
+        <Stack.Screen 
+          name="Splash" 
+          component={Splash}
+          options={{
+            // Prevenir navegación hacia atrás desde splash
+            gestureEnabled: false,
+          }}
+        />
 
-        {/* Auth */}
-        <Stack.Screen name="Login" component={Login} />
-        <Stack.Screen name="Register" component={Register} />
+        {/* Pantallas de autenticación */}
+        <Stack.Screen 
+          name="Login" 
+          component={Login}
+          options={{
+            title: 'Iniciar Sesión',
+            // Animación específica para login
+            animation: 'fade',
+          }}
+        />
+        
+        <Stack.Screen 
+          name="Register" 
+          component={Register}
+          options={{
+            title: 'Crear Cuenta',
+            // Transición suave para registro
+            animation: 'slide_from_bottom',
+          }}
+        />
 
-        {/* App privada con tabs */}
-        <Stack.Screen name="MainTabs" component={MainTabs} />
+        {/* Aplicación principal con pestañas para usuarios autenticados */}
+        <Stack.Screen 
+          name="MainTabs" 
+          component={MainTabs}
+          options={{
+            // Prevenir navegación hacia atrás desde app principal
+            gestureEnabled: false,
+            // Transición fade para entrada a app principal
+            animation: 'fade',
+          }}
+        />
       </Stack.Navigator>
     </NavigationContainer>
   );

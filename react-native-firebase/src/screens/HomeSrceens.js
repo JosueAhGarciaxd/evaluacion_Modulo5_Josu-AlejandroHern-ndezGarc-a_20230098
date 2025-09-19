@@ -1,32 +1,18 @@
 // Importación de bibliotecas y componentes necesarios
 import React, { useState, useEffect } from 'react';
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  StyleSheet,
-  FlatList,
-  Alert,
-  StatusBar,
-} from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, FlatList, Alert, StatusBar, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { database, auth } from '../config/firebase';
-import {
-  collection,
-  onSnapshot,
-  orderBy,
-  query,
-  doc,
-  getDoc,
-  where,
-} from 'firebase/firestore';
+import { collection, onSnapshot, orderBy, query, doc, getDoc, where, } from 'firebase/firestore';
 import { signOut } from 'firebase/auth';
-import CardProductos from '../components/CardProductos';
+import CardProductos from '../components/CardProduct';
 
 const Home = ({ navigation }) => {
   // Estados para manejar los productos y perfil del usuario
   const [productos, setProductos] = useState([]);
   const [profile, setProfile] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   /**
    * Efecto para cargar el perfil del usuario autenticado
@@ -36,68 +22,135 @@ const Home = ({ navigation }) => {
     const user = auth.currentUser;
     const loadUserProfile = async () => {
       if (!user) return;
-      
+
       try {
         // Intentar obtener perfil completo desde Firestore
         const userDocRef = doc(database, 'users', user.uid);
         const userSnapshot = await getDoc(userDocRef);
-        
+
         if (userSnapshot.exists()) {
           setProfile(userSnapshot.data());
         } else {
           // Fallback: usar datos básicos de Firebase Auth
-          setProfile({ 
-            name: user.displayName || user.email, 
-            email: user.email 
+          setProfile({
+            name: user.displayName || user.email,
+            email: user.email
           });
         }
       } catch (error) {
         console.error('Error cargando perfil del usuario:', error);
         // Establecer perfil básico en caso de error
-        setProfile({ 
-          name: user.displayName || user.email, 
-          email: user.email 
+        setProfile({
+          name: user.displayName || user.email,
+          email: user.email
         });
       }
     };
-    
+
     loadUserProfile();
   }, []);
 
   /**
    * Efecto para obtener productos en tiempo real
    * Solo muestra productos del usuario autenticado actual
-   * Nota: La combinación de where + orderBy puede requerir un índice compuesto en Firestore
+   * Optimizado para mostrar productos recién agregados
    */
   useEffect(() => {
     const currentUserId = auth.currentUser?.uid;
-    if (!currentUserId) return; // Salir si no hay usuario autenticado
+    if (!currentUserId) {
+      setLoading(false);
+      return; // Salir si no hay usuario autenticado
+    }
 
-    // Crear consulta para productos del usuario actual, ordenados por fecha
-    const productsQuery = query(
-      collection(database, 'productos'),
-      where('uid', '==', currentUserId), // Filtrar solo productos del usuario
-      orderBy('creado', 'desc') // Ordenar por más recientes primero
-    );
+    console.log('Configurando listener de productos para usuario:', currentUserId);
 
-    // Suscribirse a cambios en tiempo real
-    const unsubscribe = onSnapshot(productsQuery, (querySnapshot) => {
-      const productsList = [];
-      querySnapshot.forEach((document) => {
-        productsList.push({ 
-          id: document.id, 
-          ...document.data() 
-        });
-      });
-      setProductos(productsList);
-    }, (error) => {
-      console.error('Error obteniendo productos:', error);
-      Alert.alert('Error', 'No se pudieron cargar los productos');
-    });
+    try {
+      // SOLUCIÓN TEMPORAL: Solo filtrar por usuario (sin ordenamiento en Firestore)
+      // Esto evita el error del índice compuesto mientras se crea el índice necesario
+      const productsQuery = query(
+        collection(database, 'productos'),
+        where('uid', '==', currentUserId) // Solo filtrar por usuario
+      );
 
-    // Cleanup: desuscribirse al desmontar el componente
-    return () => unsubscribe();
+      // Suscribirse a cambios en tiempo real
+      const unsubscribe = onSnapshot(
+        productsQuery, 
+        (querySnapshot) => {
+          console.log('Recibidos datos del snapshot, documentos:', querySnapshot.size);
+          
+          const productsList = [];
+          querySnapshot.forEach((document) => {
+            const data = document.data();
+            productsList.push({
+              id: document.id,
+              ...data,
+              // Convertir timestamp a fecha si es necesario
+              creado: data.creado?.toDate ? data.creado.toDate() : data.creado
+            });
+          });
+          
+          // Ordenar en JavaScript por fecha de creación (más recientes primero)
+          // NOTA: Una vez que crees el índice compuesto, puedes volver a usar orderBy en Firestore
+          productsList.sort((a, b) => {
+            const dateA = a.creado instanceof Date ? a.creado : new Date(a.creado || 0);
+            const dateB = b.creado instanceof Date ? b.creado : new Date(b.creado || 0);
+            return dateB - dateA; // Descendente (más recientes primero)
+          });
+          
+          console.log('Productos procesados y ordenados:', productsList.length);
+          setProductos(productsList);
+          setLoading(false);
+          setRefreshing(false);
+        }, 
+        (error) => {
+          console.error('Error obteniendo productos:', error);
+          setLoading(false);
+          setRefreshing(false);
+          
+          // Mostrar error más específico según el tipo
+          if (error.code === 'failed-precondition') {
+            Alert.alert(
+              'Configuración de Base de Datos',
+              'Es necesario crear un índice en Firestore. Haz clic en el enlace del error en la consola para crearlo automáticamente.',
+              [
+                { text: 'Entendido', style: 'default' },
+                { text: 'Recargar', onPress: () => setRefreshing(true) }
+              ]
+            );
+          } else {
+            Alert.alert(
+              'Error de Conexión', 
+              'No se pudieron cargar los productos. Verifica tu conexión a internet.',
+              [
+                { text: 'Reintentar', onPress: () => setRefreshing(true) }
+              ]
+            );
+          }
+        }
+      );
+
+      // Cleanup: desuscribirse al desmontar el componente
+      return () => {
+        console.log('Limpiando listener de productos');
+        unsubscribe();
+      };
+    } catch (error) {
+      console.error('Error configurando listener:', error);
+      setLoading(false);
+      Alert.alert('Error', 'No se pudo configurar la sincronización de productos');
+    }
   }, []);
+
+  /**
+   * Función para refrescar manualmente los datos
+   */
+  const onRefresh = () => {
+    setRefreshing(true);
+    // El useEffect se ejecutará nuevamente y actualizará los datos
+    setTimeout(() => {
+      if (refreshing) setRefreshing(false);
+    }, 5000); // Timeout de seguridad
+  };
 
   /**
    * Navega a la pantalla de edición de perfil
@@ -137,7 +190,7 @@ const Home = ({ navigation }) => {
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
       <StatusBar barStyle="light-content" backgroundColor="#0F0E0E" />
-      
+
       {/* HEADER PRINCIPAL CON INFORMACIÓN DEL USUARIO */}
       <View style={styles.headerCard}>
         {/* Información del usuario */}
@@ -150,17 +203,17 @@ const Home = ({ navigation }) => {
 
         {/* Botones de acción del header */}
         <View style={styles.headerButtons}>
-          <TouchableOpacity 
-            style={[styles.actionButton, styles.editButton]} 
-            onPress={navigateToEditProfile} 
+          <TouchableOpacity
+            style={[styles.actionButton, styles.editButton]}
+            onPress={navigateToEditProfile}
             activeOpacity={0.85}
           >
             <Text style={styles.actionButtonText}>Editar Perfil</Text>
           </TouchableOpacity>
-          
-          <TouchableOpacity 
-            style={[styles.actionButton, styles.logoutButton]} 
-            onPress={handleLogout} 
+
+          <TouchableOpacity
+            style={[styles.actionButton, styles.logoutButton]}
+            onPress={handleLogout}
             activeOpacity={0.85}
           >
             <Text style={styles.actionButtonText}>Cerrar Sesión</Text>
@@ -168,22 +221,55 @@ const Home = ({ navigation }) => {
         </View>
       </View>
 
-      {/* TÍTULO DE SECCIÓN */}
-      <Text style={styles.sectionTitle}>Inventario de Productos</Text>
+      {/* TÍTULO DE SECCIÓN CON CONTADOR */}
+      <View style={styles.sectionHeader}>
+        <Text style={styles.sectionTitle}>Inventario de Productos</Text>
+        {productos.length > 0 && (
+          <Text style={styles.productCount}>{productos.length} productos</Text>
+        )}
+      </View>
 
-      {/* LISTA DE PRODUCTOS */}
+      {/* LISTA DE PRODUCTOS CON REFRESH */}
       <FlatList
         data={productos}
         renderItem={renderProductItem}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.listContainer}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={['#8B9A46']}
+            tintColor="#8B9A46"
+            title="Actualizando productos..."
+            titleColor="#EEEEEE"
+          />
+        }
         ListEmptyComponent={
           <View style={styles.emptyStateContainer}>
-            <Text style={styles.emptyStateTitle}>Sin Productos Registrados</Text>
-            <Text style={styles.emptyStateDescription}>
-              Utilice el botón "Agregar" en la barra inferior para registrar su primer producto.
-            </Text>
+            {loading ? (
+              <>
+                <Text style={styles.emptyStateTitle}>Cargando Productos...</Text>
+                <Text style={styles.emptyStateDescription}>
+                  Sincronizando con la base de datos
+                </Text>
+              </>
+            ) : (
+              <>
+                <Text style={styles.emptyStateTitle}>Sin Productos Registrados</Text>
+                <Text style={styles.emptyStateDescription}>
+                  Utilice el botón "Agregar" en la barra inferior para registrar su primer producto.
+                </Text>
+                <TouchableOpacity 
+                  style={styles.refreshButton}
+                  onPress={onRefresh}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.refreshButtonText}>Actualizar Lista</Text>
+                </TouchableOpacity>
+              </>
+            )}
           </View>
         }
       />
@@ -268,13 +354,23 @@ const styles = StyleSheet.create({
   },
 
   // Botón de editar perfil
-  editButton: { 
+  editButton: {
     backgroundColor: '#8B9A46',
   },
 
   // Botón de cerrar sesión
-  logoutButton: { 
+  logoutButton: {
     backgroundColor: '#541212',
+  },
+
+  // Header de sección con contador
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 24,
+    marginBottom: 16,
+    marginHorizontal: 20,
   },
 
   // Título de sección principal
@@ -282,11 +378,20 @@ const styles = StyleSheet.create({
     fontSize: 22,
     fontWeight: '700',
     color: '#EEEEEE',
-    marginTop: 24,
-    marginBottom: 16,
-    marginHorizontal: 20,
     textTransform: 'uppercase',
     letterSpacing: 1,
+  },
+
+  // Contador de productos
+  productCount: {
+    fontSize: 14,
+    color: '#8B9A46',
+    fontWeight: '600',
+    backgroundColor: '#1A1A1A',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+    overflow: 'hidden',
   },
 
   // Contenedor de la lista de productos
@@ -330,5 +435,24 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 20,
     fontWeight: '400',
+    marginBottom: 16,
+  },
+
+  // Botón de actualizar en estado vacío
+  refreshButton: {
+    backgroundColor: '#8B9A46',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    marginTop: 8,
+  },
+
+  // Texto del botón de actualizar
+  refreshButtonText: {
+    color: '#EEEEEE',
+    fontWeight: '600',
+    fontSize: 12,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
 });
